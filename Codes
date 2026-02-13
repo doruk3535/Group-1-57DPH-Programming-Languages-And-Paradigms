@@ -1,0 +1,797 @@
+\documentclass[conference]{IEEEtran}
+
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+
+\usepackage[hidelinks]{hyperref}
+
+\usepackage{amsmath,amssymb,amsfonts}
+
+\usepackage{algorithmic}
+
+\usepackage{graphicx}
+
+\usepackage{textcomp}
+
+\usepackage{xcolor}
+
+\usepackage{tabularx}
+
+\usepackage{ragged2e}
+
+\usepackage{array}
+
+\usepackage{booktabs}
+
+\newcolumntype{Y}{>{\RaggedRight\arraybackslash}X}
+
+\usepackage{placeins}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+
+T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{DocuChat: A Retrieval-Augmented Document Question-Answering Assistant for PDF-Centric Workflows}
+
+\author{\IEEEauthorblockN{Doruk Kagan Ergin}
+
+\IEEEauthorblockA{\textit{Wydział Zarządzania i Nauk Technicznych} \\
+
+\textit{Menedżerska Akademia Nauk Stosowanych w Warszawie}\\
+
+Mazowieckie, Polska \\
+
+78741@office.mans.org.pl}
+
+\and
+
+\IEEEauthorblockN{Cuneyt Emre Durak}
+
+\IEEEauthorblockA{\textit{Wydział Zarządzania i Nauk Technicznych} \\
+
+\textit{Menedżerska Akademia Nauk Stosowanych w Warszawie}\\
+
+Mazowieckie, Polska \\
+
+78745@office.mans.org.pl}
+
+\and
+
+\IEEEauthorblockN{Emre Tamer}
+
+\IEEEauthorblockA{\textit{Wydział Zarządzania i Nauk Technicznych} \\
+
+\textit{Menedżerska Akademia Nauk Stosowanych w Warszawie}\\
+
+Mazowieckie, Polska \\
+
+78713@office.mans.org.pl}
+
+\and
+
+\IEEEauthorblockN{Alihan Karaca}
+
+\IEEEauthorblockA{\textit{Wydział Zarządzania i Nauk Technicznych} \\
+
+\textit{Menedżerska Akademia Nauk Stosowanych w Warszawie}\\
+
+Mazowieckie, Polska \\
+
+78698@office.mans.org.pl}
+
+\and
+
+\IEEEauthorblockN{Kumar Nalinaksh}
+
+\IEEEauthorblockA{\textit{Wydział Zarządzania i Nauk Technicznych} \\
+
+\textit{Menedżerska Akademia Nauk Stosowanych w Warszawie}\\
+
+Mazowieckie, Polska \\
+
+kumar.nalinaksh@office.mans.org.pl}
+
+}
+
+\maketitle
+
+\begin{abstract}
+
+Long form Pdf document have now become the norm in education research and industry but accessing specific information in them is still time consuming when navigation relies on keyword search and manual reading. Large language model enhance fluency in summarization and question answering whereas standalone generation is limited by the inability to access private documents and by hallucination that are not easily audited. This paper proposes \emph{DocuChat} a Pdf based question answering system that uses retrieval augmented generation to ground responses in user supplied documents.DocuChat extract and cleans Pdf text divide it into overlapping chunk, embeds the chunks into a shared vector space and retrieve the top $k$ most relevant passages using a FAISS index prior to answer generation the interface provide access to evidence for the user and facilitate transparency through citation style context display and Pdf excerpt highlighting.the reported evaluation results include retrieval success rates across five query types (80-100\% relevant chunk coverage mean 91\%) and latency measurements that increase with retrieval depth (1.2$\pm$0.3,seconds at $k{=}1$ to 5.0$\pm$1.2,seconds at $k{=}10$) transparency (4.7/5) and ease of use (4.6/5) receive the highest ratings in the user feedback summary. The contribution is a fully reproducible RAG pipeline for Pdfs with explicit discussion of retrieval latency trade-offs and evidence-oriented interaction design.
+
+\end{abstract}
+
+\begin{IEEEkeywords}
+
+Retrieval augmented generation, document question answering, Pdf processing dense retrieval FAISS and evidence grounding.
+
+\end{IEEEkeywords}
+
+\section{Introduction}\label{sec:introduction}
+
+Technical reading required of students and professional has great increased in volume as scientific publications manuals and regulatory text continue to expand in size and revision frequency. Pdf remains a popular delivery format however its structure isnt always convenient for question driven access even when the required information exists in a document the coresponding sentence may be located several pages away from matching keyword.
+
+Keywords search is useful baseline for many tasks but its limited by vocabulary mismatch and a shallow model of context. A query written using synonyms paraphrases or domain specific phrasing may fail to retrieve the relevant paragraph even when the answer is present. Furthermore a number of questions demand synthesis across multiple sections e.g... (definition assumptions and experimental constraints located far apart) which isnt effectifely supported by single hit keyword matches.
+
+Llms shift document interaction toward natural language question and conversational responses. Two practical problems remain. First a general purpose Llm cant answer questions about a private Pdf unless the document content is provided to the model. Second generation without explicit supporting evidence may produce answers that sound credible but lack documentation which is unacceptable in academic and complince oriented applications.
+
+In this paper these shortcoming are addressed through the introduction of a RAG pdf question answering assistant called \emph{DocuChat}. The system retrieves relevant passages from the users document and conditions answer generation on that evidence prioritizing traceability over purely fluently output.
+
+\noindent\textbf{The objectives of this work are:} to develop an end to end pdfd ingestion and retrieval pipeline suitable for interactive use and to expose evidence in interface to support verification.
+
+\noindent\textbf{The main contributions of this paper are:}
+
+\begin{itemize}
+
+\item a complete RAG workflow for Pdf question answering including ingestion cleaning chunking dense retrieval and evidence conditioned response generation.
+
+\item an interface design that emphasizes auditability through retrieved context display and Pdf excerpt highlighting.
+
+\item an empirical summary of retrieval accuracy user feedback and latency trends as retrieval depth varies clarifying the performance trade offs of top$k$ retrieval.
+
+\end{itemize}
+
+\noindent\textbf{Paper organization:} Section~\ref{sec:literature_review} reviews related approaches to document retrieval and RAG. Section~\ref{sec:challenges} summarize practical challenges for Pdf based Qa. Sections~\ref{sec:proposed_solution} and~\ref{sec:implementation} describe the proposed solution and implementation. Section~\ref{sec:results} consolidates evaluations outcomes into a unified result section. Sections~\ref{sec:future_work} and~\ref{sec:conclusion} discus extensions conclude the paper.
+
+\section{Literature Review}
+
+\label{sec:literature_review}
+
+People often use old method and ask question from Pdf files or to summarize document this kind of task is called long document understanding in many system traditional information retrieval methods are used methods likeTF IDFand BM25 are very popular because they are fast and easy to use ~\cite{SaltonBuckley1988},~\cite{RobertsonZaragoza2009} . These method work well when the users question and the document use the same words. But problem start when question use different word. For example, document say “car” but user ask “vehicle”. Old system can not understand this. It only match word, not meaning. Because of this,the system sometimes cannot find the correct answer, even if it is present in the document. This make system look blind.Another big problem is when answer is not in one place. In many pdf, information is spread in many sentence or section. Old retrival method not good in this case. To fix this problem new system use neural retrival method. This method change question and document text into number. These number is call vector.~\cite{Vaswani2017} Vector try show meaning of text. So system not only see word but also idea behind word.Transformer modelhelp a lot for this these model read sentence with context. They look at the words to the left and right to understand the meaning ~\cite{Devlin2019} ,~\cite{Johnson2017} dpr use two encoder. One encoder for question one encoder for passage.Both question and passage go to same vector space.Because of this system can compare meaning not only word ~\cite{Karpukhin2020} .
+
+in many test, dpr work much better than old sparse method.
+
+But dense retrival also have problem. There can be million of vector. Searching all of them is slow. For interactive document assistant, speed is very important. User do not want wait long time sosystem use special tool like FAISS. FAISS help search many vector very fast using GPU ~\cite{Lewis2020RAG} . But finding text is still not enough. User want direct answer or short summary. Because of this, system also use text generation model. These model can write answer or summary from text ~\cite{Guu2020REALM} , ~\cite{Borgeaud2022RETRO} . In summarization task ROUGE score is often use. ROUGE check how similar generate summary is to correct summary ~\cite{Asai2023SelfRAG} buttext generation model have big problem. Sometime they write thing that is not true. They can make up information. This is very bad in document system. User want answer that they can check in document. To fix this problem, RAG method is use. RAG mean Retrieval Augmented Generation. In RAG, system first search document. Then system generate answer only from found text. So system is not free to imagine. It must use evidence ~\cite{Beltagy2020Longformer} . This make answer more correct and less fake. Other system like REALM and RETRO also use retrival inside model.They help the model acquire knowledge from documents or databases ~\cite{Zaheer2020BigBird} ,~\cite{NogueiraCho2019} New ideas like Self RAG try to make the system smarter. System learn when need search and when not it also learn how fix mistake by itself ~\cite{KhattabZaharia2020ColBERT}.These idea helps make better Pdf assistant. Good Pdf assistant not only give answer it also show where answer come from. For example system show page number or paragraph. So user can open Pdf and check.This make user trust system more. System performance depend on many thing. One important thing is chunking. Chunking mean cutting document into small part. If chunk is too big system miss detail. If chunk is too small system become slow. Overlap between chunk is also important. Some overlap help keep meaning.
+
+Another important factor retrieval depth which refer how many chunk the system select system usually pick the top K chunks alarger K provide more information but slows down the response, while a smaller K is faster but may miss the answer some systems use crossencoders like BERT to re rank results~\cite{KhattabZaharia2020ColBERT} which improve accuracy but requires more computation ColBERT aims achieve similar quality at a lower cost~\cite{Lewis2020BART}.Long documents are also challenging for standard transformers because they have limited context windows models such as longformer and BigBird address this by using special attention mechanisms to handle longer texts~\cite{Zhang2020PEGASUS,Lin2004ROUGE} even with longcontext models grounding and source visibility remain important as a user still want to see where answers come from ingeneral effective Pdf question answering and summarization system need strong retrieval find the relevant sections quickly efficient indexing and search and answer based on real evidence with clear source these ideas are exactly what RAG based Pdf assistants follow. a RAG assistant retrieves the top K chunk generates an answer from them and displays the supporting page evidence. this makes the system more transparent and when the system is transparent users tend to trust it more.
+
+\begin{table}[t]
+
+\caption{Summary of Key Methods in Document Question Answering}
+
+\label{tab:literature_review_strict}
+
+\centering
+
+\scriptsize
+
+\resizebox{\columnwidth}{!}{%
+
+\begin{tabular}{|p{1.8cm}|p{3.8cm}|p{4.5cm}|p{4.5cm}|}
+
+\hline
+
+\textbf{Study} & \textbf{Method} & \textbf{Advantages} & \textbf{Limitations} \\
+
+\hline
+
+\cite{SaltonBuckley1988}
+
+& Sparse Retrieval (TF IDF)
+
+& Fast and simple; performs well on short queries and small dataset
+
+& Limited semantic understanding weak for distributed information \\
+
+\hline
+
+\cite{RobertsonZaragoza2009}
+
+& Sparse Retrieval (BM 25)
+
+& Efficient ranking using term weighting
+
+& Lacks contextual semantic understanding \\
+
+\hline
+
+\cite{Vaswani2017}
+
+& Dense Retrieval (DPR)
+
+& Semantic matchings beyond keyword
+
+& Higher latency embedding preprocessing required \\
+
+\hline
+
+\cite{Devlin2019}
+
+& Dense Retrieval(FAISS)
+
+& Fast largescale vector search with gpu acceleration
+
+& Embedding generation is computationally expensive \\
+
+\hline
+
+\cite{Johnson2017}
+
+& LLM Generation (GPT)
+
+& Fluent natural language generations
+
+& Risk of hallucination and unsupported answes \\
+
+\hline
+
+\cite{Karpukhin2020}
+
+& LLM Generation (BERT)
+
+& Strong contextual embedding and understanding
+
+& Limited generative capability \\
+
+\hline
+
+\cite{Lewis2020RAG}
+
+& RAG System
+
+& Grounded outputs with retrieval support
+
+& Complex systems setup \\
+
+\hline
+
+\cite{Guu2020REALM}
+
+& RAG System
+
+& More accurate and verifiable response
+
+& Limited transparency \\
+
+\hline
+
+\cite{Borgeaud2022RETRO}
+
+& Multi Agent Approache
+
+& Specialized agents improve performance
+
+& Higher coordination complexity \\
+
+\hline
+
+\cite{Asai2023SelfRAG}
+
+& Role-Specialized Agents
+
+& Improved reliability and output qualitys
+
+& Requires strict workflow design \\
+
+\hline
+
+\cite{Beltagy2020Longformer}
+
+& Retrieval Augmented Validation
+
+& Ensures compliance and grounded result
+
+& Depends on external documentation quality \\
+
+\hline
+
+\cite{Zaheer2020BigBird}
+
+& Iterative Critique and feedback
+
+& Reduces errors through iterative refinement
+
+& Needs structured monitoring \\
+
+\hline
+
+\cite{NogueiraCho2019}
+
+& Passage Reranking with BERT
+
+& Improves top-ranked passage accuracy
+
+& Additional computational cost \\
+
+\hline
+
+\cite{KhattabZaharia2020ColBERT}
+
+& ColBERT
+
+& Good balance between effectiveness and speed
+
+& More complex architecture \\
+
+\hline
+
+\cite{Lewis2020BART}
+
+& BART
+
+& Strong summarization and generation performance
+
+& Large and resource-intensive \\
+
+\hline
+
+\cite{Zhang2020PEGASUS}
+
+& PEGASUS
+
+& Excellent abstractive summarization
+
+& Requires large scale pretraining \\
+
+\hline
+
+\cite{Lin2004ROUGE}
+
+& ROUGE Evaluation Metric
+
+& Standard automatic summarization evaluation
+
+& Limited semantic evaluation \\
+
+\hline
+
+\end{tabular}}
+
+\end{table}
+
+\section{Challenges}\label{sec:challenges}
+
+There are several challenge that are especially pertinent Pdf based assistants driven by prior work and common user expectations:
+
+\begin{itemize}
+
+\item \textbf{Semantic mismatch in retrieval:} Lexical technique can fail to locate relevant passage when the query use paraphrases or domain specific synonyms~\cite{SaltonBuckley1988,RobertsonZaragoza2009}.
+
+\item \textbf{Latency constraints:} Dense retrievals improve recall but introduce embedding and vector search overhead which might reduce interactive usability as a retrieval depth increases~\cite{Johnson2017,Karpukhin2020}.
+
+\item \textbf{Hallucinations under incomplete context:} Without properly retrieved evidence generation model may produce fluently but unsupported claim which motivates evidence grounded generation~\cite{Lewis2020RAG}.
+
+\item \textbf{Distributed evidence across pages:} Many queries require cross section synthesis increases the need for chunking strategies , top-$k$ retrieval that preserve context.
+
+\item \textbf{User trust and verification:} Document assistant are more credible when they provide citations excerpts or highlighting that allow user to verify the answer directly in the source.
+
+\end{itemize}
+
+\section{Proposed Solution}\label{sec:proposed_solution}
+
+DocuChat is a Pdf based RAG assistant that combine dense retrieval with evidence conditioned response generation in a lightweight web interface. The design objective is not only to provide answer but also to make the basis of each answer visible to the user.
+
+Fig.~\ref{fig:architecture} illustrate the system pipeline a pdf is ingested and a converted into cleaned text. The document is segmented into overlapping chunk to reduce boundary effects when relevant information span adjacent paragraphs. Each chunk is embedded and stored in a FAISS vector index. At query time, the question is embedded into the same space the top$k$ chunks are retrieved and the retrieved text is passed to the LLM with a prompt that constrains the response to the provided context metadata is retained to support citation and highlight views.
+
+\begin{figure}[!t]
+
+\centering
+
+\includegraphics[width=1\linewidth,height=0.18\textheight]{architecture.jpg}
+
+\caption{DocuChat system architecture (logo/watermark to be removed in camera-ready diagram export).}
+
+\label{fig:architecture}
+
+\end{figure}
+
+Fig.~\ref{fig:process} summarize the interaction flow: the user uploads a document submits a question, the system retrieve candidate evidence and the answer is returned with supporting context Fig.~\ref{fig:er} presents the data model used to relate documents, chunks embeddings and conversational artifacts (queries and answers), supporting traceability and potential persistence.
+
+\begin{figure}[!t]
+
+\centering
+
+\includegraphics[width=1\linewidth]{process_flowchart.png}
+
+\caption{DocuChat retrieval and generation workflow (logo/watermark to be removed in camera-ready diagram export).}
+
+\label{fig:process}
+
+\end{figure}
+
+\begin{figure}[!t]
+
+\centering
+
+\includegraphics[width=1\linewidth, height=0.18\textheight]{er_diagram.png}
+
+\caption{Entity relationship model for document chunk embeddings querie and answers (logo to be removed in camera ready diagram export)}
+
+\label{fig:er}
+
+\end{figure}
+
+\section{Implementation}\label{sec:implementation}
+
+The prototypes is deployed as a Streamlit application with a modular pipeline covering ingestion, indexing and retrieval response presentation. Pdf parsing is performed using standard Python Pdf tools after which extracted text is normalized to remove layout artifacts such as broken line wraps, repeated headers footers and inconsistent spacing. Chunking uses overlapping windows reported configuration: 500-800 token with 50-100 token overlap to preserve local coherence across chunk boundarie.
+
+Chunk are densely embedded and indexed using FAISS. Question embeddings are computed in the same space enabling top $k$ retrieval (evaluation use $k$ values shown onTable~\ref{tab:retrieval_accuracy}) retrieved passage are concatenated with explicit separators and provided to the LLM with instructions to restrict the answer to the retrieved context reducing unsupported statement.
+
+Table~\ref{tab:tech_stack} summarizes the core technologie used by the prototype the interface also supports to evidence inspection through context display and excerpt highlighting (Fig.~\ref{fig:context_highlighting}) reinforcing verification primary interaction step
+
+\begin{table}[h]
+
+\caption{DocuChat Implementation Components}
+
+\label{tab:tech_stack}
+
+\centering
+
+\scriptsize
+
+\setlength{\tabcolsep}{4.2pt}
+
+\renewcommand{\arraystretch}{1.15}
+
+\begin{tabularx}{\columnwidth}{@{}p{0.28\columnwidth}p{0.26\columnwidth}X@{}}
+
+\toprule
+
+\textbf{Component} & \textbf{Technology} & \textbf{Role in System} \\
+
+\midrule
+
+Frontend & Streamlit & Provides upload UI, chat-style Q\&A, evidence display, and export functionality. \\
+
+Pdf Parsing & \texttt{PyPdf2} / \texttt{pdfplumber} & Handles text extraction and basics layout normalization. \\
+
+Chunking & Overlapping token windows & Preserve local coherence and reduce boundary loss. \\
+
+Embeddings & OpenAI embeddings & maps queries and chunks into a shared vector space \\
+
+Vector Index & FAISS & Efficient similarity search over chunk embeddings \\
+
+LLM answering & Openai GPT style model & Generates answers constrained by retrieveed context. \\
+
+Persistence & SQLite & Stores documents chunks and query metadata for traceability. \\
+
+\bottomrule
+
+\end{tabularx}
+
+\end{table}
+
+\begin{figure}[!t]
+
+\centering
+
+\includegraphics[width=1\linewidth]{pdf_ingestion.png}
+
+\caption{PDF ingestion view in the Streamlit interfaces.}
+
+\label{fig:pdf_ingestion}
+
+\end{figure}
+
+\begin{figure}[!t]
+
+\centering
+
+\includegraphics[width=1\linewidth]{embedding_retrieval.png}
+
+\caption{Embedding and retrieval interface for top $k$ evidence selection.}
+
+\label{fig:embedding_retrieval}
+
+\end{figure}
+
+\begin{figure}[!t]
+
+\centering
+
+\includegraphics[width=0.78\linewidth]{answer_generation.png}
+
+\caption{Answer generation view based on retrieved context.}
+
+\label{fig:answer_generation}
+
+\end{figure}
+
+\section{Results}\label{sec:results}
+
+The retrieval system demonstrate strong performances for concept search and definition querie achieving %100 coverage at k=3 k=3 k=3. This indicate is effective semantic matching for localized information multi page reasoning shows lower coverage %80 at k=5k=5k=5 suggesting that evidence distributed acros multiple document section remain challenging with limited retrieval depth.
+
+Latency increases approximately linearly with top k. The mean response time rise from 1.2 seconds at k=1k=1k=1 to 5.0 seconds at k=10k=10k=10, reflecting the trade off between evidence coverage and responsivenes. For interactive scenarios moderate value of k=3–5k=3\text{–}5k=3–5 provide a practical balance.
+
+User feedback is align with a these observation. Transparency received the highest rating (4.7/5) indicating the importance of evidence visibility. Latency received the lowest rating (4.2/5) consistent with measured response times.
+
+These results suggest that in document centric workflows and auditability is prioritized over minimal latency.
+
+\textbf{Retrieval accuracy.} Table~\ref{tab:retrieval_accuracy} shows the proportion of a case in which relevant chunk were retrieved for five query type. Performance remains high for concept search and definition (%100 at $k{=}3$). The lowest score occur for multipage reasoning (80\% at $k{=}5$), which align with the observation that distributed evidence is harder to capture with a limited number of retrieved chunks averaged over the five query types relevant-chunk coverage is 91\%, indicating that the dense retrieval configuration is effective for the tested scenarios while still leaving room for improvement on crosssection questions
+
+\begin{table}[!t]
+
+\caption{Retrieval Accuracy Across Query Types}
+
+\label{tab:retrieval_accuracy}
+
+\centering
+
+\scriptsize
+
+\setlength{\tabcolsep}{4.5pt}
+
+\renewcommand{\arraystretch}{1.15}
+
+\begin{tabular}{@{}l l c c@{}}
+
+\toprule
+
+\textbf{Query ID} & \textbf{Query Type} & \textbf{Relevant Chunks Found (\%)} & \textbf{Top $k$} \\
+
+\midrule
+
+Q01 & Concept search & 100 & 3 \\
+
+Q02 & Fact look up & 90 & 3 \\
+
+Q03 & Multipage reasoning & 80 & 5 \\
+
+Q04 & Definition & 100 & 3 \\
+
+Q05 & Procedure & 85 & 5 \\
+
+\bottomrule
+
+\end{tabular}
+
+\end{table}
+
+\textbf{User feedback and perceived trust.} two form of user feedback are reported. Table~\ref{tab:user_quotes} lists qualitative comment from four participant which emphasize evidence visibility and clarity. Table~\ref{tab:user_feedback_scores} summarize quantitative score on a 1-5 scale with transparency (4.7) and ease of use (4.6) rated highest notably latency receive the lowest of the four aggregate scores (4.2) aligning with the measured growth in response time a retrieval depth increase. Fig.~\ref{fig:user_feedback} visualize these rating.
+
+\begin{table}[!t]
+
+\caption{User Feedback (Qualitative Comments)}
+
+\label{tab:user_quotes}
+
+\centering
+
+\footnotesize
+
+\setlength{\tabcolsep}{4pt}
+
+\renewcommand{\arraystretch}{1.15}
+
+\begin{tabularx}{\columnwidth}{@{}p{0.18\columnwidth}Y@{}}
+
+\toprule
+
+\textbf{Participant} & \textbf{Feedback} \\
+
+\midrule
+
+P1 & ``Im really trust the result becuse the sources are shown.'' \\
+
+P2 & ``Response are fast and summaries are very clear i recomend!'' \\
+
+P3 & ``Simple interface chunk adjustment are effective and interesting'' \\
+
+P4 & ``Transparency is high; citations improve trust.'' \\
+
+\bottomrule
+
+\end{tabularx}
+
+\end{table}
+
+\begin{table}[!t]
+
+\caption{User Feedback Summary (1--5 Scale)}
+
+\label{tab:user_feedback_scores}
+
+\centering
+
+\scriptsize
+
+\setlength{\tabcolsep}{5.0pt}
+
+\renewcommand{\arraystretch}{1.15}
+
+\begin{tabular}{@{}l c p{0.48\columnwidth}@{}}
+
+\toprule
+
+\textbf{Metric} & \textbf{Score} & \textbf{Comment} \\
+
+\midrule
+
+Answer accuracy & 4.5 & Answers perceived as precise and grounded \\
+
+Transparency & 4.7 & Page level citation and evidence display improved trust \\
+
+Ease of use & 4.6 & Interface perceived as simple and intuitive \\
+
+Latency & 4.2 & Response time acceptable for small Pdfs increases with larger contexts \\
+
+\bottomrule
+
+\end{tabular}
+
+\end{table}
+
+\begin{figure}[!t]
+
+\centering
+
+\includegraphics[width=0.85\linewidth, height=0.23\textheight]{user_feedback.png}
+
+\caption{Graphical summary of user feedback.}
+
+\label{fig:user_feedback}
+
+\end{figure}
+
+\textbf{Evidence display and highlighting.} Fig.~\ref{fig:context_highlighting} illustrate the evidence oriented interaction design by linking an answer to highlighted excerpt in the source Pdf. This feature address a central usability concern in LLM based assistants: even when an answer is correct user frequently need to confirm it in context, especially for technical definitions and constraints in DocuChat highlighting provides a direct path from generated text to documentary evidence,strengthening the systems auditability.
+
+\begin{figure}[t]
+
+\centering
+
+\includegraphics[width=0.92\linewidth]{context_highlighting.png}
+
+\caption{Example of excerpt display and highlighting within the Pdf view.}
+
+\label{fig:context_highlighting}
+
+\end{figure}
+
+\textbf{Latency trends and top $k$ trade-off.} Table~\ref{tab:latency} and Fig.~\ref{fig:latency_graph} show that querys latency increases with retrieval depths. The mean latency grows from 1.2\,s at $k{=}1$ to 2.4\,s at $k{=}3$, reaching 5.0\,seconds at $k{=}10$. This behavior reflects an expected trade-off: larger $k$ increases the amount of retrieved evidence and the prompt context passed to the generator, improving recall for distributed evidence at the cost of responsivenes for interactive use, the results suggest that moderate $k$ values offer a reasonable compromise between evidence coverage and perceived speed.
+
+\begin{table}[!t]
+
+\caption{Query Latency as a Function of Retrieval Depth}
+
+\label{tab:latency}
+
+\centering
+
+\scriptsize
+
+\setlength{\tabcolsep}{5.0pt}
+
+\renewcommand{\arraystretch}{1.15}
+
+\begin{tabular}{@{}c c c l@{}}
+
+\toprule
+
+\textbf{Top-$k$} & \textbf{Avg.\ Latency (s)} & \textbf{Std.\ Dev.} & \textbf{Comment} \\
+
+\midrule
+
+1 & 1.2 & 0.3 & Fast for short question \\
+
+3 & 2.4 & 0.5 & Typical interactive setting \\
+
+5 & 3.1 & 0.7 & Slower improve coverage on longer Pdf \\
+
+10 & 5.0 & 1.2 & Heavy context noticeable delay \\
+
+\bottomrule
+
+\end{tabular}
+
+\end{table}
+
+\begin{figure}[!t]
+
+\centering
+
+\includegraphics[width=0.78\linewidth]{latency_graph.png}
+
+\caption{Latency trend as retrieval depth (top$k$) increases.}
+
+\label{fig:latency_graph}
+
+\end{figure}
+
+\section{Future Work}\label{sec:future_work}
+
+A number of extension might enhance robustness and reduces reliance on external service.Multidocument retrieval would enable cross document question answering.Sparse ranking BM25 combined with dense retrieval can improve a recall under vocabulary mismatch while remaining responsive.Re ranking using lightweight cross-encoders could also enhance precision when top $k$ includes semantically adjacent but irrelevant chunk.
+
+From a deployment perspective replacing cloud embeddings and generation with local models would improve privacy guarantees, reduce API cost sensitivity. Evidence features can be expanded: sentence level citation mapping, clickable page link and a structured ``evidence panel'' that lists the exact chunks used by the generator. Finally a more rigorous evaluation protocol with larger document sets explicit relevance labels and per document stratification would support stronger claims regarding generalization.
+
+\section{Conclusion}\label{sec:conclusion}
+
+DocuChat was presented a retrieval augmented assistant for answering questions on Pdf document emphasizing evidence grounding and interactive usability. The system integrates Pdf text extraction, overlapping chunking dense embeddings and FAISS based similarity search evidence conditioned answer generation a streamlit interface exposes retrieved context and highlights supporting pdf excerpts allowing users to verify answers directly in the source document.
+
+Evaluation results indicate that the retrieval configuration is effective across multiple question types achieving %80-100 relevant chunk coverage across five query categories, with a mean coverage of 91% users feedbacks align with these finding: transparency and ease of use received the highest ratings, highlighting the importance of evidence visibility and interface simplicity latency increased with higher top kkk values and response time received the lowest user feedback score. This underscore a practical design consideration for RAG system increasing retrieval depth improves evidence coverage for question requiring distributed information but might reduce interactivity if not managed carefully.
+
+Several limitation remain the evaluation was limited in scope and reported tables do not fully specify document diversity or relevance labeling procedures. Additionally reliance on external ApIs for embedding and generation may introduce privacy and availability concern in certain deployment context these limitation motivate future work on hybrid retrieval approaches stronger re ranking local model support and more rigorous evaluation designs.
+
+Overall Docuchat demonstrate that evidence oriented RAG can provide a viable interaction model for long Pdf document bridging the gap between manual document navigation and unconstrained LLM generation by treating retrieval evidence as a first class artifact.
+
+\section*{Acknowledgment}
+
+All author helped write the paper and approve the final version there was no funding the author have no conflicts of interest the code and implementation resources are available on GitHub repositories listed inproject material.
+
+\begin{enumerate}
+
+\item \textbf{Data Availability:} Prototype evaluation artifact include a demonstration repository and an informals feedback summary; rawsurvey responses are not publiclys released.
+
+\item \textbf{Code Availability:}The source code is available at
+
+\url{https://github.com/cuneyted} and
+
+\url{https://github.com/doruk3535}.
+
+\end{enumerate}
+
+\begin{thebibliography}{00}
+
+\bibitem{SaltonBuckley1988}
+
+G.~Salton and C.~Buckley, ``Term-weighting approaches in automatic text retrieval,'' \emph{Information Processing \& Management}, vol.~24, no.~5, pp.~513--523, 1988.
+
+\bibitem{RobertsonZaragoza2009}
+
+S.~Robertson and H.~Zaragoza, ``The probabilistic relevance framework: BM25 and beyond,'' \emph{Foundations and Trends in Information Retrieval}, vol.~3, no.~4, pp.~333--389, 2009.
+
+\bibitem{Vaswani2017}
+
+A.~Vaswani, N.~Shazeer, N.~Parmar, J.~Uszkoreit, L.~Jones, A.~N.~Gomez, {\L}.~Kaiser, and I.~Polosukhin, ``Attention is all you need,'' in \emph{Advances in Neural Information Processing Systems (NeurIPS)}, 2017.
+
+\bibitem{Devlin2019}
+
+J.~Devlin, M.-W.~Chang, K.~Lee, and K.~Toutanova, ``BERT: Pre-training of deep bidirectional transformers for language understanding,'' in \emph{Proc. NAACL-HLT}, 2019, pp.~4171--4186.
+
+\bibitem{Johnson2017}
+
+J.~Johnson, M.~Douze, and H.~J\'egou, ``Billion-scale similarity search with GPUs,'' \emph{arXiv preprint} arXiv:1702.08734, 2017.
+
+\bibitem{Karpukhin2020}
+
+V.~Karpukhin, B.~O\u{g}uz, S.~Min, P.~Lewis, L.~Wu, S.~Edunov, D.~Chen, and W.-t.~Yih, ``Dense passage retrieval for open-domain question answering,'' in \emph{Proc. EMNLP}, 2020, pp.~6769--6781.
+
+\bibitem{Lewis2020RAG}
+
+P.~Lewis, E.~Perez, A.~Piktus, F.~Petroni, V.~Karpukhin, N.~Goyal, H.~K\"uttler, M.~Lewis, W.-t.~Yih, T.~Rockt\"aschel, S.~Riedel, and D.~Kiela, ``Retrieval-augmented generation for knowledge-intensive NLP tasks,'' in \emph{Advances in Neural Information Processing Systems (NeurIPS)}, 2020.
+
+\bibitem{Guu2020REALM}
+
+K.~Guu, K.~Lee, Z.~Tung, P.~Pasupat, and M.-W.~Chang, ``REALM: Retrieval-augmented language model pre-training,'' in \emph{Proc. Int. Conf. Machine Learning (ICML)}, 2020.
+
+\bibitem{Borgeaud2022RETRO}
+
+S.~Borgeaud, A.~Mensch, J.~Hoffmann, T.~Cai, E.~Rutherford, K.~Millican, G.~van~den~Driessche, J.-B.~Lespiau, B.~Damoc, A.~Clark, \emph{et al.}, ``Improving language models by retrieving from trillions of tokens,'' in \emph{Proc. ICML}, 2022, pp.~2206--2240.
+
+\bibitem{Asai2023SelfRAG}
+
+A.~Asai, Z.~Wu, Y.~Wang, A.~Sil, and H.~Hajishirzi, ``Self-RAG: Learning to retrieve, generate, and critique through self-reflection,'' \emph{arXiv preprint} arXiv:2310.11511, 2023.
+
+\bibitem{Beltagy2020Longformer}
+
+I.~Beltagy, M.~E.~Peters, and A.~Cohan, ``Longformer: The long-document transformer,'' \emph{arXiv preprint} arXiv:2004.05150, 2020.
+
+\bibitem{Zaheer2020BigBird}
+
+M.~Zaheer, G.~Guruganesh, A.~Dubey, J.~Ainslie, C.~Alberti, S.~Ontanon, P.~Pham, A.~Ravula, Q.~Wang, L.~Yang, and A.~Ahmed, ``Big Bird: Transformers for longer sequences,'' in \emph{Advances in Neural Information Processing Systems (NeurIPS)}, 2020.
+
+\bibitem{NogueiraCho2019}
+
+R.~Nogueira and K.~Cho, ``Passage re-ranking with BERT,'' \emph{arXiv preprint} arXiv:1901.04085, 2019.
+
+\bibitem{KhattabZaharia2020ColBERT}
+
+O.~Khattab and M.~Zaharia, ``ColBERT: Efficient and effective passage search via contextualized late interaction over BERT,'' in \emph{Proc. 43rd Int. ACM SIGIR Conf. Research and Development in Information Retrieval (SIGIR)}, 2020.
+
+\bibitem{Lewis2020BART}
+
+M.~Lewis, Y.~Liu, N.~Goyal, M.~Ghazvininejad, A.~Mohamed, O.~Levy, V.~Stoyanov, and L.~Zettlemoyer, ``BART: Denoising sequence-to-sequence pre-training for natural language generation, translation, and comprehension,'' in \emph{Proc. ACL}, 2020, pp.~7871--7880.
+
+\bibitem{Zhang2020PEGASUS}
+
+J.~Zhang, Y.~Zhao, M.~Saleh, and P.~Liu, ``PEGASUS: Pre-training with extracted gap-sentences for abstractive summarization,'' in \emph{Proc. ICML}, 2020, pp.~11328--11339.
+
+\bibitem{Lin2004ROUGE}
+
+C.-Y.~Lin, ``ROUGE: A package for automatic evaluation of summaries,'' in \emph{Text Summarization Branches Out}, 2004, pp.~74--81.
+
+\end{thebibliography}
+
+\end{document}
